@@ -10,7 +10,9 @@ env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("API_KEY")
-with open("seoul_regions.json", "r", encoding="utf-8") as file:
+base_dir = os.path.dirname(os.path.abspath(__file__))
+json_path = os.path.join(base_dir, "seoul_regions.json")
+with open(json_path, "r", encoding="utf-8") as file:
     seoul_regions = json.load(file)
 
 def get_parking_data(region="여의도"):

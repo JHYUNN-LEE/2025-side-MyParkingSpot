@@ -9,7 +9,9 @@ API_URL = os.getenv("API_URL", "http://fastapi:8000")
 st.title("🚗 실시간 주차장 현황 대시보드")
 
 # JSON 파일에서 지역 리스트 불러오기
-with open("seoul_regions.json", "r", encoding="utf-8") as file:
+base_dir = os.path.dirname(os.path.abspath(__file__))
+json_path = os.path.join(base_dir, "seoul_regions.json")
+with open(json_path, "r", encoding="utf-8") as file:
     seoul_regions = json.load(file)
 
 # fastAPI에서 사용 가능한 POI 코드 목록 가져오기
