@@ -1,0 +1,6 @@
+requests
+beautifulsoup4
+lxml
+kafka-python
+schedule
+python-dotenv
