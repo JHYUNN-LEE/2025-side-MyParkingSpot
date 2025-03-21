@@ -2,12 +2,10 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
 # 현재 파일(parking.py)이 위치한 디렉토리에서 .env 파일 경로 지정
-env_path = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv(".env")
 
 api_key = os.getenv("API_KEY")
 base_dir = os.path.dirname(os.path.abspath(__file__))
