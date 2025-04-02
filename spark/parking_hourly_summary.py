@@ -1,6 +1,12 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, when, avg, window, current_timestamp, decode # to_timestamp
+from pyspark.sql.functions import from_json, col, when, avg, window, decode, from_utc_timestamp
 from pyspark.sql.types import StructType, StringType
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVER")
 
 spark = SparkSession.builder \
     .appName("HourlyParkingSummary") \
@@ -19,38 +25,25 @@ schema = StructType() \
 
 df = spark.readStream \
     .format("kafka") \
-    .option("kafka.bootstrap.servers", "kafka1:29092,kafka2:29092,kafka3:29092") \
+    .option("kafka.bootstrap.servers", bootstrap_servers) \
     .option("subscribe", "parking_status") \
     .option("startingOffsets", "latest") \
     .load()
 
-parsed_df = df.selectExpr("CAST(value AS BINARY) as value") \
-       .withColumn("json_str", decode(col("value"), "UTF-8")) \
-       .withColumn("data", from_json(col("json_str"), schema)) \
-       .select("data.*")
-
-# parsed_df = parsed_df.withColumn("CAPACITY", when(col("CAPACITY").rlike("^\d+$"), col("CAPACITY")).otherwise("0").cast("int"))
-# parsed_df = parsed_df.withColumn("OCCUPIED_SPOTS", when(col("OCCUPIED_SPOTS").rlike("^\d+$"), col("OCCUPIED_SPOTS")).otherwise("0").cast("int"))
-parsed_df = parsed_df.withColumn("CAPACITY", col("CAPACITY").cast("int"))
-parsed_df = parsed_df.withColumn("OCCUPIED_SPOTS", col("OCCUPIED_SPOTS").cast("int"))
+parsed_df = df.selectExpr("CAST(value AS BINARY) as value", "timestamp") \
+    .withColumn("json_str", decode(col("value"), "UTF-8")) \
+    .withColumn("data", from_json(col("json_str"), schema)) \
+    .select("data.*", "timestamp") \
+    .withColumn("CAPACITY", col("CAPACITY").cast("int")) \
+    .withColumn("OCCUPIED_SPOTS", col("OCCUPIED_SPOTS").cast("int"))
 
 clean_df = parsed_df.filter(col("IS_REALTIME_STATUS_PROVIDED") == "Y") \
     .na.fill({"CAPACITY": 0, "OCCUPIED_SPOTS": 0}) \
     .withColumn("AVAILABLE_SPOTS", when(
         col("CAPACITY") - col("OCCUPIED_SPOTS") < 0, 0
     ).otherwise(col("CAPACITY") - col("OCCUPIED_SPOTS"))) \
-    .withColumn("RECEIVED_AT", current_timestamp()) \
-    .withWatermark("RECEIVED_AT", "1 hour")  # 수신 시간 기준 집계
-    # .withColumn("LAST_UPDATE", to_timestamp("LAST_UPDATE", "yyyy-MM-dd HH:mm:ss")) \
-    # .withWatermark("LAST_UPDATE", "1 hour")
-
-# clean_df 아래에 추가
-clean_df.select("REGION", "REGION_CODE", "CAPACITY", "OCCUPIED_SPOTS", "AVAILABLE_SPOTS").writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("truncate", False) \
-    .start() \
-    .awaitTermination()
+    .withColumnRenamed("timestamp", "RECEIVED_AT") \
+    .withWatermark("RECEIVED_AT", "1 minute") 
 
 # 1시간 단위로 집계
 agg_df = clean_df.groupBy(
@@ -65,13 +58,13 @@ agg_df = clean_df.groupBy(
     col("REGION_CODE"),
     col("AVG_AVAILABLE_SPOTS")
 )
+agg_df = agg_df.withColumn("hour", from_utc_timestamp(col("hour"), "Asia/Seoul"))
 
-# PostgreSQL 저장
 def write_to_postgres(batch_df, epoch_id):
     batch_df.write \
         .format("jdbc") \
         .option("url", "jdbc:postgresql://postgres:5432/sidebase") \
-        .option("dbtable", "parking.parking_hourly_summary") \
+        .option("dbtable", "parking.parking_hourly_avg") \
         .option("user", "postgres") \
         .option("password", "postgres.side!") \
         .option("driver", "org.postgresql.Driver") \
@@ -79,7 +72,13 @@ def write_to_postgres(batch_df, epoch_id):
         .save()
 
 agg_df.writeStream \
-    .outputMode("append") \
+    .format("console") \
+    .outputMode("update") \
+    .option("truncate", False) \
+    .start()
+
+agg_df.writeStream \
+    .outputMode("update") \
     .foreachBatch(write_to_postgres) \
     .start() \
     .awaitTermination()
