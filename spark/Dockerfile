@@ -3,7 +3,8 @@ FROM bitnami/spark:3.5.5-debian-12-r0
 
 # 작업 디렉토리 설정
 WORKDIR /opt/bitnami/spark
-
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 # 필요한 패키지 설치 및 Kafka 관련 JAR 다운로드
 USER root
 RUN apt-get update && \
